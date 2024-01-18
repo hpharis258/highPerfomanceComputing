@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Encrypt Password function
+// Cuda Crypt Function
 __device__
 char* CudaCrypt(char* rawPassword) {
 	
@@ -44,14 +44,12 @@ char* CudaCrypt(char* rawPassword) {
 	return newPassword;
 }
 
-/**
-	Checks if one char string matches another char string of the length
-*/
+// Function to check if two strings are the same.
 __device__ 
-int isEncryptedMatching(char* one, char* two, int length) {
+int isStringMatching(char* StringOne, char* StringTwo, int length) {
 	int result = 1;
 	for (int i = 0; i < length; i++) {
-		if (one[i] != two[i]) {
+		if (StringOne[i] != StringTwo[i]) {
 			result = 0;
 			break;
 		}
@@ -59,14 +57,12 @@ int isEncryptedMatching(char* one, char* two, int length) {
 	return result;
 }
 
-/**
-	Decrypts a pass using a CUDA thread
-*/
+// DECRYPT PASSWORD FUNCTION
 __global__
-void decryptPass(char* alphabet, char* numbers, char* encryptedPass, char* deviceOutputPass)
+void decryptPassword(char* alphabet, char* numbers, char* encryptedPass, char* deviceOutputPass)
 {
 	/// Get cuda unique thread id
-	int uid = blockDim.x * blockIdx.x + threadIdx.x;
+	int uniqueid = blockDim.x * blockIdx.x + threadIdx.x;
 	
 	/// Check if another thread found output pass before starting
 	if(*deviceOutputPass != NULL) {
@@ -74,26 +70,25 @@ void decryptPass(char* alphabet, char* numbers, char* encryptedPass, char* devic
 		return;
 	}
 
-	/// Create password to check on this thread
-	char potentialPass[4];
-	potentialPass[0] = alphabet[blockIdx.x];
-	potentialPass[1] = alphabet[blockIdx.y];
-	potentialPass[2] = numbers[threadIdx.x];
-	potentialPass[3] = numbers[threadIdx.y];
+	/// Create pass to check on this thread
+	char GeneratedPass[4];
+	GeneratedPass[0] = alphabet[blockIdx.x];
+	GeneratedPass[1] = alphabet[blockIdx.y];
+	GeneratedPass[2] = numbers[threadIdx.x];
+	GeneratedPass[3] = numbers[threadIdx.y];
 	
 	/// Encrypt the potential password
-	char* encryptedPotential;
-	encryptedPotential = CudaCrypt(potentialPass);
+	char* encryptedPotentialPassword;
+	encryptedPotentialPassword = CudaCrypt(GeneratedPass);
 	
-	//printf("UID: '%d' Plain: '%s' Encrypted Plain: '%s' Target Encrypted: '%s'\n", uid, potentialPass, encryptedPotential, encryptedPass);
-	
-	/// Check the current potential pass is matches the target encryptedPass
-	if ( isEncryptedMatching(encryptedPass, encryptedPotential, 11) > 0 )
+	/// check if encrypted password string is the same as the encrypted potential password string.
+	if (isStringMatching(encryptedPass, encryptedPotentialPassword, 11) > 0 )
 	{
-		/// Matches so set deviceOutputPassword to the current combination
-		printf("UID '%d' Encrypted pass '%s' from combination '%s' matches pass = '%s'\n", uid, encryptedPass, potentialPass, encryptedPotential);
+		/// Password strings are the same so set deviceOutputPassword to the current generated password
+		printf("THREAD ID '%d' Encrypted password '%s' : '%s' matches password = '%s'\n", uniqueid, encryptedPass, GeneratedPass, encryptedPotentialPassword);
+		// Loop to copy the string
 		for (int i = 0; i < 4; i++ ) {
-			deviceOutputPass[i] = potentialPass[i];
+			deviceOutputPass[i] = GeneratedPass[i];
 		}
 	}
 }
@@ -102,30 +97,28 @@ void decryptPass(char* alphabet, char* numbers, char* encryptedPass, char* devic
 	
 */
 int main(int argc, char** argv) {
-	// TEST Password used: 
-	/*
-		Test Encrypted Passwords:
-		az01 = ccbdwy2253
-		aa52 = ccbddb7362
-	*/
-	// HARD CODED TEST PASS
-	char* encryptedPass = "ccbdwy2253";
-	// optionaly you can pass in the 
+	printf("Welcome to the CUDA password cracker!!!\n"); 
+	//Test Encrypted Passwords:
+	//aa52 = ccbddb7362
+	char* encryptedPass;
+	// pass in the encrypted password as a command line argument if you want to. 
 	if (argc > 1) {
 		encryptedPass = argv[1];
+	}else{
+	 encryptedPass = "ccbddb7362";
 	}
 	 
-	printf("Pass: '%s'\n", encryptedPass);
+	printf("Encrypted Password used: '%s'\n", encryptedPass);
 	
-	// Init alphabet and numbers array to read only use in cuda 
-	char cpuAlphabet[26] = { 'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z' };
+	// Init abc and numbers array to read only use in cuda 
+	char cpuABC[26] = { 'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z' };
 	char cpuNumbers[10] = { '0', '1', '2', '3', '4', '5', '6' ,'7', '8', '9' };
 	
 	int sizeOfEncryptedPass = sizeof(char) * 11;
 	
-	char* gpuAlphabet;
-	cudaMalloc( (void**) &gpuAlphabet, sizeof(char) * 26 );
-	cudaMemcpy( gpuAlphabet, cpuAlphabet, sizeof(char) * 26, cudaMemcpyHostToDevice );
+	char* gpuABC;
+	cudaMalloc( (void**) &gpuABC, sizeof(char) * 26 );
+	cudaMemcpy( gpuABC, cpuABC, sizeof(char) * 26, cudaMemcpyHostToDevice );
 	
 	char* gpuNumbers;
 	cudaMalloc( (void**) &gpuNumbers, sizeof(char) * 10 );
@@ -138,32 +131,26 @@ int main(int argc, char** argv) {
 	char* gpuOutputPass;
 	cudaMalloc( (void**) &gpuOutputPass, sizeOfEncryptedPass );
 	
-	
-	/// Launch cuda threads and await finish
-	decryptPass<<< dim3(26, 26, 1), dim3(10, 10, 1) >>>(gpuAlphabet, gpuNumbers, gpuEncryptedPass, gpuOutputPass);
+	// 26 block for x, 26 block for y, Blocks divide the letters, threads divide the numbers
+	decryptPassword<<< dim3(26, 26, 1), dim3(10, 10, 1) >>>(gpuABC, gpuNumbers, gpuEncryptedPass, gpuOutputPass);
+	// Synchronize threads
 	cudaDeviceSynchronize();
-	
-	
-	printf("Finished synchronizing CUDA threads\n");
-	
-	/// Copy GPU output pass to the CPU
+	// Allocate Memory for the Output password.
 	char* cpuOutputPass = (char*)malloc( sizeof(char) * 4 );
+	/// Copy GPU output pass to the CPU : Device to Host
 	cudaMemcpy(cpuOutputPass, gpuOutputPass, sizeOfEncryptedPass, cudaMemcpyDeviceToHost);
-
-	/// If output pass contained an output, print the results
-	printf("---\n");
-	printf("Results:\n");
+	/// If output password is not null or empty, print output password
 	if (cpuOutputPass != NULL && cpuOutputPass[0] != 0) {
-		printf("Given Encrypted Pass: '%s'\n", encryptedPass);
-		printf("Found Decrypted Pass: '%s'\n", cpuOutputPass);
+		printf("Given Encrypted Password: '%s'\n", encryptedPass);
+		printf("Found Decrypted Password: '%s'\n", cpuOutputPass);
 	} else {
-		printf("Unable to determine a password.\n");
+		printf("Can't find a password.\n");
 	}
-	
-	/// Free any malloc'd memory
-	cudaFree(gpuAlphabet);
+	/// Free all of the used Memory
+	cudaFree(gpuABC);
 	cudaFree(gpuNumbers);
 	cudaFree(gpuEncryptedPass);
 	cudaFree(gpuOutputPass);
 	free(cpuOutputPass);
+	return 0;
 }
